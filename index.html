@@ -1,0 +1,914 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>ChemSim Pro | Dinámica Granular y Fluidización</title>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
+
+    <style>
+        /* ================= ESTILOS GLOBALES E ISLAS FLOTANTES (HUD) ================= */
+        :root {
+            --bg-panel: rgba(21, 24, 32, 0.85); --border: rgba(45, 51, 66, 0.8);
+            --text-main: #e2e8f0; --text-muted: #94a3b8;
+            --c-cyan: #0ea5e9; --c-green: #10b981; --c-orange: #f59e0b; --c-red: #ef4444;
+            --panel-blur: blur(10px);
+        }
+        
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', system-ui, sans-serif; user-select: none; }
+        body { background: radial-gradient(circle at center, #1e2434 0%, #050608 100%); color: var(--text-main); height: 100vh; overflow: hidden; position: relative; }
+        
+        #canvas-container { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 1; outline: none; }
+
+        .hud-panel {
+            position: absolute; background: var(--bg-panel); backdrop-filter: var(--panel-blur); -webkit-backdrop-filter: var(--panel-blur);
+            border: 1px solid var(--border); border-radius: 12px; z-index: 10;
+            display: flex; flex-direction: column; transition: transform 0.3s, opacity 0.3s, height 0.3s, max-height 0.3s;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5); pointer-events: auto;
+        }
+        .hud-header {
+            padding: 12px 15px; font-size: 0.85rem; font-weight: bold; color: var(--text-muted); text-transform: uppercase;
+            border-bottom: 1px solid var(--border); background: rgba(0,0,0,0.3); border-radius: 12px 12px 0 0;
+            display: flex; justify-content: space-between; align-items: center; cursor: pointer;
+        }
+        
+        .hud-content { padding: 15px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+        .hud-content::-webkit-scrollbar { width: 6px; }
+        .hud-content::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+        
+        .collapsed .hud-content { display: none; }
+        .toggle-icon { color: var(--c-cyan); font-size: 1.2rem; line-height: 1; transition: 0.3s; }
+        .collapsed .toggle-icon { transform: rotate(-90deg); }
+
+        .main-actions { display: flex; flex-direction: column; gap: 6px; margin-bottom: 5px; }
+        .control-sliders { display: flex; flex-direction: column; gap: 12px; }
+
+        #hud-controls { top: 15px; left: 15px; width: 320px; max-height: calc(100vh - 30px); }
+        #hud-telemetry { top: 15px; right: 15px; width: 340px; }
+        #hud-charts { bottom: 15px; right: 15px; width: 450px; }
+        #hud-top-center { top: 15px; left: 50%; transform: translateX(-50%); background: var(--bg-panel); padding: 8px 15px; border-radius: 20px; border: 1px solid var(--border); z-index: 1000; display: flex; gap: 15px; font-weight: bold; backdrop-filter: blur(5px);}
+
+        .control-group { background: rgba(0,0,0,0.2); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.05); }
+        .control-group-title { font-size: 0.75rem; color: var(--c-cyan); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 1px;}
+        
+        .control { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+        .control:last-child { margin-bottom: 0; }
+        .control-label { display: flex; justify-content: space-between; font-size: 0.85rem; }
+        .val { font-family: monospace; font-weight: bold; color: var(--text-main); font-size: 0.95rem; }
+        
+        input[type=range] { -webkit-appearance: none; width: 100%; background: transparent; }
+        input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; height: 16px; width: 16px; border-radius: 50%; background: var(--c-cyan); cursor: pointer; margin-top: -6px; box-shadow: 0 0 8px rgba(14,165,233,0.5); }
+        input[type=range]::-webkit-slider-runnable-track { width: 100%; height: 4px; background: var(--border); border-radius: 2px; }
+        input[type=range]:disabled::-webkit-slider-thumb { background: var(--text-muted); cursor: not-allowed; box-shadow: none; }
+        
+        button, select { font-size: 0.9rem; font-weight: bold; padding: 10px 15px; border-radius: 6px; cursor: pointer; transition: 0.2s; outline: none; border: none; width: 100%; }
+        .mode-select { background: rgba(0,0,0,0.5); color: var(--c-cyan); border: 1px solid var(--border); margin-bottom: 10px;}
+        .btn-play { background-color: var(--c-green); color: white; box-shadow: 0 4px 10px rgba(16,185,129,0.3); }
+        .btn-pause { background-color: var(--c-orange); color: black; box-shadow: 0 4px 10px rgba(245,158,11,0.3); }
+        .btn-ar { background: transparent; border: 2px solid var(--c-cyan); color: var(--c-cyan); margin-top: 5px;}
+        .btn-ar:hover { background: var(--c-cyan); color: #000; }
+        .btn-action { background: #2d3342; color: white; padding: 6px 10px; font-size: 0.8rem; margin-top: 5px;}
+
+        .card-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .card { background: rgba(0,0,0,0.3); border: 1px solid var(--border); border-radius: 8px; padding: 10px; text-align: center; }
+        .card-title { font-size: 0.65rem; color: var(--text-muted); text-transform: uppercase; margin-bottom: 5px; }
+        .card-value { font-size: 1.2rem; font-family: monospace; font-weight: bold; color: var(--text-main); }
+        .card-value.highlight { color: var(--c-green); }
+        #regime-indicator { padding: 10px; border-radius: 6px; text-align: center; font-weight: bold; font-size: 0.9rem; letter-spacing: 1px; transition: 0.3s; margin-bottom: 10px;}
+        
+        .counter-badge { color: var(--c-orange); font-family: monospace; font-size: 1.1rem; }
+
+        #ar-modal { display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: #000; z-index: 9999; }
+        #ar-iframe { width: 100%; height: 100%; border: none; }
+        .ar-controls { position: absolute; top: env(safe-area-inset-top, 20px); left: 50%; transform: translateX(-50%); z-index: 10000; pointer-events: none; width: 90%; text-align: center;}
+        .ar-controls button { pointer-events: auto; padding: 12px 25px; width: auto; font-size: 1rem; box-shadow: 0 4px 15px rgba(0,0,0,0.5);}
+
+        /* ======== MEDIA QUERIES ======== */
+        @media (max-width: 1024px) and (orientation: portrait) {
+            .hud-header { padding: 10px; font-size: 0.8rem; }
+            .hud-content { padding: 10px; }
+            #hud-controls { top: auto; bottom: 0; left: 0; width: 100vw; border-radius: 12px 12px 0 0; max-height: 48vh; padding-bottom: env(safe-area-inset-bottom, 10px); }
+            #hud-controls.collapsed .hud-content { display: flex !important; padding-bottom: env(safe-area-inset-bottom, 15px); }
+            #hud-controls.collapsed .control-sliders { display: none !important; }
+            .main-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 0; }
+            #btn-play, #btn-freeze, #btn-stop-flow, .btn-ar { margin: 0; padding: 10px 4px; font-size: 0.7rem; line-height: 1.1; display: flex; align-items: center; justify-content: center; text-align: center; white-space: pre-wrap; height: 100%; }
+            .btn-ar { grid-column: span 2; margin-top: 2px;}
+            input[type=range]::-webkit-slider-thumb { height: 24px; width: 24px; margin-top: -10px; }
+            #hud-top-center { top: env(safe-area-inset-top, 5px); width: max-content; font-size: 0.7rem; padding: 6px 12px; gap: 8px; z-index: 11; }
+            #hud-telemetry { top: calc(env(safe-area-inset-top, 5px) + 40px); right: 5px; width: 140px; }
+            #hud-telemetry .card-grid { grid-template-columns: 1fr; gap: 4px; }
+            #hud-telemetry .card { padding: 4px; }
+            #hud-telemetry .card-title { font-size: 0.55rem; margin-bottom: 2px;}
+            #hud-telemetry .card-value { font-size: 0.95rem; }
+            #regime-indicator { font-size: 0.65rem; padding: 6px; margin-bottom: 6px;}
+            #hud-charts { display: flex; top: calc(env(safe-area-inset-top, 5px) + 40px); left: 5px; bottom: auto; right: auto; width: 150px; }
+            #hud-charts .hud-content { height: 100px; padding: 5px; }
+            #chartCanvas { width: 100% !important; height: 100% !important; }
+        }
+
+        @media (max-width: 1024px) and (orientation: landscape) {
+            #hud-controls { top: 0; bottom: 0; left: auto; right: 0; width: 320px; max-height: 100vh; border-radius: 12px 0 0 12px; padding-right: env(safe-area-inset-right, 10px); padding-bottom: env(safe-area-inset-bottom, 5px); }
+            #hud-controls.collapsed .hud-content { display: flex !important; }
+            #hud-controls.collapsed .control-sliders { display: none !important; }
+            .main-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 5px;}
+            .btn-ar { grid-column: span 2; margin-top: 0;}
+            #hud-telemetry { top: 5px; right: 330px; width: 160px; max-height: 95vh; }
+            #hud-telemetry .card-grid { grid-template-columns: 1fr; gap: 4px; }
+            #hud-charts { display: flex; top: 5px; left: env(safe-area-inset-left, 5px); right: auto; bottom: auto; width: 220px; }
+            #hud-charts .hud-content { height: 130px; padding: 5px; }
+            #hud-top-center { top: 5px; left: 50%; width: max-content; padding: 5px 15px;}
+        }
+    </style>
+</head>
+<body>
+
+    <div id="canvas-container"></div>
+    
+    <div id="hud-top-center">
+        <span>⏱ <span id="time-overlay" style="font-family: monospace;">0.00 s</span></span>
+        <span>|</span>
+        <span>Partículas: <span id="particle-counter" class="counter-badge">1200</span></span>
+    </div>
+
+    <div id="hud-controls" class="hud-panel">
+        <div class="hud-header" onclick="this.parentElement.classList.toggle('collapsed')">
+            <span>⚙️ Panel de Control Granular</span>
+            <span class="toggle-icon">▼</span>
+        </div>
+        
+        <div class="hud-content">
+            <div class="main-actions">
+                <button id="btn-play" class="btn-play" onclick="App.System.play()">▶ COMENZAR</button>
+                <button id="btn-freeze" class="btn-pause" onclick="App.System.freeze()">⏸ PAUSAR</button>
+                <button id="btn-stop-flow" class="btn-pause" style="background-color: var(--c-red); color: white;" onclick="App.System.stopFlow()">⏹ DETENER FLUJO</button>
+                <button class="btn-ar" onclick="App.System.openAR()">👁️ REALIDAD AUMENTADA</button>
+            </div>
+
+            <div class="control-sliders">
+                <select id="sim-mode" class="mode-select" onchange="App.System.changeMode(this.value)">
+                    <option value="sandbox">Modo Sandbox (Manual)</option>
+                    <option value="real">Simulación Real (Automático)</option>
+                </select>
+
+                <div class="control-group">
+                    <div class="control-group-title">Hidrodinámica del Gas</div>
+                    <div class="control">
+                        <div class="control-label"><span>Vel. Comandada (u)</span><span class="val" id="lbl-u">0.000 m/s</span></div>
+                        <input type="range" id="inp-u" min="0" max="0.8" step="0.001" value="0.00">
+                    </div>
+                    <div class="control">
+                        <div class="control-label"><span style="color:var(--c-orange);">Radio Activo (Distribuidor)</span><span class="val" id="lbl-rflujo" style="color:var(--c-orange);">75%</span></div>
+                        <input type="range" id="inp-rflujo" min="0.2" max="1.0" step="0.05" value="0.75">
+                    </div>
+                    <div class="control">
+                        <div class="control-label"><span>Densidad Gas (ρf)</span><span class="val" id="lbl-rhof">1.2 kg/m³</span></div>
+                        <input type="range" id="inp-rhof" min="0.5" max="3" step="0.1" value="1.2">
+                    </div>
+                    <div class="control">
+                        <div class="control-label"><span>Viscosidad Gas (μ)</span><span class="val" id="lbl-mu">1.80e-5 Pa·s</span></div>
+                        <input type="range" id="inp-mu" min="0.00001" max="0.00005" step="0.000001" value="0.000018">
+                    </div>
+                </div>
+
+                <div class="control-group">
+                    <div class="control-group-title">Materia Granular (Sólidos)</div>
+                    <div class="control">
+                        <div class="control-label"><span>Diámetro Partícula (dp)</span><span class="val" id="lbl-dp">0.0017 m</span></div>
+                        <input type="range" id="inp-dp" min="0.0001" max="0.003" step="0.0001" value="0.0017">
+                    </div>
+                    <div class="control">
+                        <div class="control-label"><span>Densidad Sólido (ρs)</span><span class="val" id="lbl-rhos">2500 kg/m³</span></div>
+                        <input type="range" id="inp-rhos" min="1000" max="4000" step="50" value="2500">
+                    </div>
+                    <div class="control">
+                        <div class="control-label"><span>Altura Nominal Inicial (L0)</span><span class="val" id="lbl-l0">0.30 m</span></div>
+                        <input type="range" id="inp-l0" min="0.1" max="0.6" step="0.01" value="0.30">
+                    </div>
+                    <div class="control" style="margin-top: 10px; border-top: 1px dashed var(--border); padding-top: 10px;">
+                        <div class="control-label"><span>Cantidad de Sólidos</span><span class="val counter-badge" id="lbl-particles">1200</span></div>
+                        <button class="btn-action" onclick="App.System.addParticles(100)">+ Añadir 100 Partículas</button>
+                        <label style="font-size: 0.8rem; display: flex; align-items: center; gap: 8px; margin-top: 5px; cursor: pointer;">
+                            <input type="checkbox" id="inp-autoadd" onchange="App.State.autoAdd = this.checked"> Agregar continuamente (Alimentación)
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="hud-telemetry" class="hud-panel">
+        <div class="hud-header" onclick="this.parentElement.classList.toggle('collapsed')">
+            <span>📊 Telemetría</span>
+            <span class="toggle-icon">▼</span>
+        </div>
+        <div class="hud-content">
+            <div id="regime-indicator">REPOSO GRANULAR</div>
+            <div class="card-grid">
+                <div class="card" style="grid-column: span 2;">
+                    <div class="card-title">Vel. Mín. Fluidización Global (Umf)</div>
+                    <div class="card-value highlight" id="out-umf">0.0000</div>
+                    <div class="card-unit" style="font-size: 0.7rem; color: var(--text-muted);">m/s</div>
+                </div>
+                <div class="card">
+                    <div class="card-title">Caída Presión ΔP</div>
+                    <div class="card-value" id="out-deltap">0</div>
+                    <div class="card-unit" style="font-size: 0.7rem; color: var(--text-muted);">Pa</div>
+                </div>
+                <div class="card">
+                    <div class="card-title">Altura Expansión</div>
+                    <div class="card-value" id="out-l">0.000</div>
+                    <div class="card-unit" style="font-size: 0.7rem; color: var(--text-muted);">m</div>
+                </div>
+                <div class="card">
+                    <div class="card-title">Reynolds</div>
+                    <div class="card-value" id="out-re" style="font-size:1rem;">0.0</div>
+                </div>
+                <div class="card">
+                    <div class="card-title">Arquímedes</div>
+                    <div class="card-value" id="out-ar" style="font-size:1rem;">0.0</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="hud-charts" class="hud-panel">
+         <div class="hud-header" onclick="this.parentElement.classList.toggle('collapsed')">
+            <span>📈 Termodinámica: ΔP vs Velocidad</span>
+            <span class="toggle-icon">▼</span>
+        </div>
+        <div class="hud-content" style="height: 200px; padding: 10px;">
+            <canvas id="chartCanvas" style="width: 100%; height: 100%;"></canvas>
+        </div>
+    </div>
+
+    <div id="ar-modal">
+        <div class="ar-controls">
+            <button class="btn-pause" onclick="App.System.closeAR()" style="background-color: var(--c-red); color: white;">✖ CERRAR RA</button>
+        </div>
+        <iframe id="ar-iframe" allow="camera; xr-spatial-tracking"></iframe>
+    </div>
+
+    <script>
+        const App = {};
+
+        // ==========================================
+        // 1. ESTADO GLOBAL DE INGENIERÍA
+        // ==========================================
+        App.State = {
+            isRunning: false,
+            isFrozen: false, 
+            mode: 'sandbox',
+            time: 0,
+            autoAdd: false,
+            lastAddTimer: 0,
+            in: { u: 0.0, rflujo: 0.75, dp: 0.0017, rhos: 2500, rhof: 1.2, mu: 0.000018, l0_base: 0.3, e0: 0.4 },
+            out: { ar: 0, remf: 0, umf: 0, umf_global: 0, deltap: 0, l_exp: 0.3, re: 0, regimen: 'REPOSO GRANULAR', n_ratio: 1.0, u_real: 0 },
+            listeners: [],
+            
+            update(key, value) {
+                this.in[key] = parseFloat(value);
+                if (App.Web3D && App.Web3D.particleEngine) {
+                    App.Physics.recalculateStatic();
+                    App.Physics.updateInstantaneousState(App.Web3D.particleEngine.u_inercial);
+                } else {
+                    App.Physics.recalculateStatic();
+                    App.Physics.updateInstantaneousState(this.in.u);
+                }
+            },
+            notify() {
+                this.listeners.forEach(cb => cb(this.in, this.out));
+            }
+        };
+
+        // ==========================================
+        // 2. MOTOR MATEMÁTICO (ERGUN / WEN & YU) CONTINUO
+        // ==========================================
+        App.Physics = {
+            g: 9.81,
+            recalculateStatic() {
+                const s = App.State.in;
+                const o = App.State.out;
+                o.ar = (Math.pow(s.dp, 3) * s.rhof * (s.rhos - s.rhof) * this.g) / Math.pow(s.mu, 2);
+                o.remf = Math.sqrt(Math.pow(33.7, 2) + 0.0408 * o.ar) - 33.7;
+                o.umf = (o.remf * s.mu) / (s.dp * s.rhof);
+                o.umf_global = o.umf * Math.pow(s.rflujo, 2); // Umf aparente desde la óptica del flujo global
+            },
+
+            updateInstantaneousState(u_real) {
+                const s = App.State.in;
+                const o = App.State.out;
+                o.u_real = u_real; 
+
+                const l0_efectivo = s.l0_base * o.n_ratio;
+                const P_max = l0_efectivo * (1 - s.e0) * (s.rhos - s.rhof) * this.g;
+
+                // Velocidad local efectiva atravesando los poros
+                const u_local_efectiva = u_real / Math.pow(s.rflujo, 2);
+                o.re = (s.dp * u_local_efectiva * s.rhof) / s.mu; 
+
+                // --- LÓGICA CONTINUA DE CAÍDA DE PRESIÓN SIN SALTOS ---
+                const viscoso = 150 * ((s.mu * u_local_efectiva * Math.pow(1 - s.e0, 2)) / (Math.pow(s.dp, 2) * Math.pow(s.e0, 3)));
+                const inercial = 1.75 * ((s.rhof * Math.pow(u_local_efectiva, 2) * (1 - s.e0)) / (s.dp * Math.pow(s.e0, 3)));
+                const ergun_deltap = l0_efectivo * (viscoso + inercial);
+
+                // La presión física pura simplemente se asienta en P_max naturalmente sin saltos
+                o.deltap = Math.min(ergun_deltap, P_max);
+
+                const ratio = o.umf > 0 ? u_local_efectiva / o.umf : 0;
+
+                if (u_real <= 0.0001) {
+                    o.regimen = 'REPOSO GRANULAR';
+                    o.l_exp = l0_efectivo;
+                } else if (ratio < 0.98) {
+                    o.regimen = 'LECHO FIJO (FILTRACIÓN)';
+                    o.l_exp = l0_efectivo;
+                } else if (ratio >= 0.98 && ratio <= 1.02) {
+                    o.regimen = s.rflujo < 1.0 ? 'CANALIZACIÓN PARCIAL' : 'TRANSICIÓN (DESBLOQUEO)';
+                    o.l_exp = l0_efectivo * (1 + (ratio - 0.98) * 0.5); // Comienza micro expansión
+                } else {
+                    o.regimen = s.rflujo < 0.95 ? 'LECHO SURTIDOR (SPOUTED)' : 'FLUIDIZACIÓN COMPLETA';
+                    const Ubr = 0.711 * Math.sqrt(this.g * 0.05); 
+                    const Ub = (u_local_efectiva - o.umf) + Ubr;
+                    let delta = (u_local_efectiva - o.umf) / Ub;
+                    if(delta > 0.65) delta = 0.65; 
+                    const e_exp = delta + (1 - delta) * s.e0;
+                    o.l_exp = l0_efectivo * (1 - s.e0) / (1 - e_exp);
+                }
+
+                if (o.l_exp > 2.9) o.l_exp = 2.9;
+            },
+            recalculate() {
+                this.recalculateStatic();
+                this.updateInstantaneousState(App.State.in.u);
+                App.State.notify();
+            }
+        };
+
+        // ==========================================
+        // 3. MOTOR DEM (Discrete Element Method) OPTIMIZADO
+        // ==========================================
+        class ParticleDEM {
+            constructor(maxParticles, initialCount, R) {
+                this.max = maxParticles;
+                this.count = initialCount;
+                this.R = R;
+                this.H = 3.0; 
+                this.pos = new Float32Array(this.max * 3);
+                this.vel = new Float32Array(this.max * 3);
+                this.hashSize = 4096;
+                this.head = new Int32Array(this.hashSize);
+                this.next = new Int32Array(this.max);
+                this.u_inercial = 0; 
+                this.initBed(this.count);
+            }
+
+            initBed(num) {
+                for (let i = 0; i < num; i++) {
+                    let r = Math.sqrt(Math.random()) * this.R;
+                    let theta = Math.random() * 2 * Math.PI;
+                    this.pos[i*3] = r * Math.cos(theta);
+                    this.pos[i*3+1] = 0.02 + Math.random() * 0.3; 
+                    this.pos[i*3+2] = r * Math.sin(theta);
+                    this.vel[i*3] = 0; this.vel[i*3+1] = 0; this.vel[i*3+2] = 0;
+                }
+                App.State.out.n_ratio = this.count / 1200;
+                if(document.getElementById('particle-counter')) document.getElementById('particle-counter').innerText = this.count;
+                if(document.getElementById('lbl-particles')) document.getElementById('lbl-particles').innerText = this.count;
+            }
+
+            addParticles(num) {
+                let toAdd = Math.min(num, this.max - this.count);
+                for(let i=0; i<toAdd; i++) {
+                    let idx = (this.count + i) * 3;
+                    let r = Math.sqrt(Math.random()) * (this.R * 0.8);
+                    let theta = Math.random() * 2 * Math.PI;
+                    this.pos[idx] = r * Math.cos(theta);
+                    this.pos[idx+1] = 2.5 + Math.random() * 0.3; 
+                    this.pos[idx+2] = r * Math.sin(theta);
+                    this.vel[idx] = 0; this.vel[idx+1] = -0.5; this.vel[idx+2] = 0;
+                }
+                this.count += toAdd;
+                App.State.out.n_ratio = this.count / 1200;
+                App.Physics.recalculateStatic(); 
+                if(document.getElementById('particle-counter')) document.getElementById('particle-counter').innerText = this.count;
+                if(document.getElementById('lbl-particles')) document.getElementById('lbl-particles').innerText = this.count;
+            }
+
+            getHash(x, y, z, cellSize) {
+                let ix = Math.floor((x + this.R) / cellSize);
+                let iy = Math.floor(y / cellSize);
+                let iz = Math.floor((z + this.R) / cellSize);
+                let h = (ix * 73856093) ^ (iy * 19349663) ^ (iz * 83492791);
+                h = h % this.hashSize;
+                if(h < 0) h += this.hashSize;
+                return h;
+            }
+
+            step(dt, inputs, outputs) {
+                if (dt > 0.05) dt = 0.05; 
+                if (dt === 0) dt = 0.0001; 
+
+                let target_u = App.State.isRunning ? inputs.u : 0;
+                this.u_inercial += (target_u - this.u_inercial) * (dt * 0.8); 
+                
+                const u_local_eff = this.u_inercial / Math.pow(inputs.rflujo, 2);
+                const ratio = outputs.umf > 0 ? (u_local_eff / outputs.umf) : 0;
+                const R_activo = this.R * inputs.rflujo;
+
+                const subSteps = 3; 
+                const sdt = dt / subSteps;
+                
+                const r_p = inputs.dp * 12.0; 
+                const diam = r_p * 2.0;
+                const diamSq = diam * diam;
+
+                for(let step=0; step<subSteps; step++) {
+                    
+                    this.head.fill(-1);
+                    for(let i=0; i<this.count; i++) {
+                        let idx = i*3;
+                        let h = this.getHash(this.pos[idx], this.pos[idx+1], this.pos[idx+2], diam);
+                        this.next[i] = this.head[h];
+                        this.head[h] = i;
+                    }
+
+                    for(let i=0; i<this.count; i++) {
+                        let idx = i*3;
+                        let x = this.pos[idx], y = this.pos[idx+1], z = this.pos[idx+2];
+                        let vx = this.vel[idx], vy = this.vel[idx+1], vz = this.vel[idx+2];
+                        let r = Math.sqrt(x*x + z*z);
+                        let forceY = -9.81;
+
+                        if (r <= R_activo && this.u_inercial > 0.001) {
+                            let depthFactor = 1.0; 
+                            if (ratio < 1.0) depthFactor = Math.max(0, 1.0 - (y / inputs.l0_base)); 
+                            
+                            let dragFactor = 1.0;
+                            if (y > 2.7) dragFactor = Math.max(0, (this.H - y) / 0.3);
+
+                            let empuje = 9.81 * Math.pow(ratio, 1.5) * depthFactor * dragFactor;
+                            forceY += empuje;
+
+                            if (ratio > 0.9) {
+                                let turb = (u_local_eff * 2.0) * dragFactor;
+                                vx += (Math.random()-0.5) * turb * sdt;
+                                vz += (Math.random()-0.5) * turb * sdt;
+                                forceY += (Math.random()-0.5) * turb * 0.5 * dragFactor;
+                            }
+                        } else if (ratio > 1.0) {
+                            forceY -= 2.0; 
+                        }
+
+                        if (ratio > 1.1) {
+                            if (y > outputs.l_exp * 0.8) {
+                                vx += (x/r) * 1.5 * sdt; vz += (z/r) * 1.5 * sdt;
+                            } else if (y < 0.1 && r > R_activo) {
+                                vx -= (x/r) * 2.0 * sdt; vz -= (z/r) * 2.0 * sdt;
+                            }
+                        }
+
+                        vy += forceY * sdt;
+                        vx *= 0.99; vy *= 0.99; vz *= 0.99;
+                        x += vx * sdt; y += vy * sdt; z += vz * sdt;
+
+                        if (y < r_p) { y = r_p; vy *= -0.2; vx *= 0.7; vz *= 0.7; }
+                        if (y > this.H - r_p) { y = this.H - r_p; vy *= -0.3; vx *= 0.5; vz *= 0.5; }
+                        if (r > this.R - r_p) { let nx = x/r, nz = z/r; x = nx * (this.R - r_p); z = nz * (this.R - r_p); vx *= 0.5; vz *= 0.5; }
+
+                        this.pos[idx] = x; this.pos[idx+1] = y; this.pos[idx+2] = z;
+                        this.vel[idx] = vx; this.vel[idx+1] = vy; this.vel[idx+2] = vz;
+                    }
+
+                    for(let i=0; i<this.count; i++) {
+                        let idx = i*3;
+                        let xi = this.pos[idx], yi = this.pos[idx+1], zi = this.pos[idx+2];
+                        let ix = Math.floor((xi + this.R) / diam); let iy = Math.floor(yi / diam); let iz = Math.floor((zi + this.R) / diam);
+
+                        for(let nx = ix-1; nx <= ix+1; nx++) {
+                            for(let ny = iy-1; ny <= iy+1; ny++) {
+                                for(let nz = iz-1; nz <= iz+1; nz++) {
+                                    let h = (nx * 73856093) ^ (ny * 19349663) ^ (nz * 83492791);
+                                    h = h % this.hashSize; if(h < 0) h += this.hashSize;
+                                    
+                                    let j = this.head[h];
+                                    while(j !== -1) {
+                                        if (i < j) { 
+                                            let jdx = j*3;
+                                            let dx = this.pos[jdx] - xi; let dy = this.pos[jdx+1] - yi; let dz = this.pos[jdx+2] - zi;
+                                            let distSq = dx*dx + dy*dy + dz*dz;
+                                            
+                                            if (distSq < diamSq && distSq > 0.000001) {
+                                                let dist = Math.sqrt(distSq); let overlap = diam - dist;
+                                                let nx_c = dx/dist, ny_c = dy/dist, nz_c = dz/dist;
+                                                let corr = (overlap * 0.5) * 0.8; 
+                                                
+                                                this.pos[idx] -= nx_c * corr; this.pos[idx+1] -= ny_c * corr; this.pos[idx+2] -= nz_c * corr;
+                                                this.pos[jdx] += nx_c * corr; this.pos[jdx+1] += ny_c * corr; this.pos[jdx+2] += nz_c * corr;
+
+                                                let dvx = this.vel[jdx] - this.vel[idx]; let dvy = this.vel[jdx+1] - this.vel[idx+1]; let dvz = this.vel[jdx+2] - this.vel[idx+2];
+                                                let vrel = dvx*nx_c + dvy*ny_c + dvz*nz_c;
+                                                
+                                                if (vrel < 0) {
+                                                    let restitution = 0.1; let impulse = -(1 + restitution) * vrel * 0.5;
+                                                    this.vel[idx] -= nx_c * impulse; this.vel[idx+1] -= ny_c * impulse; this.vel[idx+2] -= nz_c * impulse;
+                                                    this.vel[jdx] += nx_c * impulse; this.vel[jdx+1] += ny_c * impulse; this.vel[jdx+2] += nz_c * impulse;
+                                                }
+                                            }
+                                        }
+                                        j = this.next[j];
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } 
+                return this.pos;
+            }
+        }
+
+        // ==========================================
+        // 4. MOTOR 3D Y RENDERIZADO
+        // ==========================================
+        App.Web3D = {
+            scene: null, camera: null, renderer: null, instancedMesh: null, controls: null,
+            particleEngine: null, dummy: new THREE.Object3D(), lastRenderTime: 0,
+            maxParticles: 3500, H: 3.0, flowCount: 40, frameCount: 0,
+
+            init() {
+                this.particleEngine = new ParticleDEM(this.maxParticles, 1200, 0.28);
+                
+                const container = document.getElementById('canvas-container');
+                this.scene = new THREE.Scene();
+                this.camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 0.1, 100);
+                if(window.innerWidth < 1024) { this.camera.position.set(0, 2.5, 6.5); } else { this.camera.position.set(0, 2.0, 5.0); }
+                
+                this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "high-performance" });
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+                this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); 
+                container.appendChild(this.renderer.domElement);
+                
+                this.controls = new THREE.OrbitControls(this.camera, this.renderer.domElement);
+                this.controls.target.set(0, this.H / 2, 0); 
+                this.controls.enableDamping = true;
+
+                this.scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+                const dirL = new THREE.DirectionalLight(0xffffff, 0.6); dirL.position.set(5, 10, 5); this.scene.add(dirL);
+
+                const wallMat = new THREE.MeshPhysicalMaterial({ color: 0x0ea5e9, transparent: true, opacity: 0.12, roughness: 0.1, side: THREE.DoubleSide });
+                this.scene.add(new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, this.H, 32).translate(0, this.H/2, 0), wallMat));
+                const topCap = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.32, 0.05, 32), new THREE.MeshStandardMaterial({color: 0x475569}));
+                topCap.position.set(0, this.H, 0); this.scene.add(topCap);
+
+                const canvas = document.createElement('canvas'); canvas.width = 256; canvas.height = 256;
+                const ctx = canvas.getContext('2d'); ctx.fillStyle = '#2d3342'; ctx.fillRect(0,0,256,256); ctx.fillStyle = '#0f172a';
+                for(let i=8; i<256; i+=16) { for(let j=8; j<256; j+=16) { ctx.beginPath(); ctx.arc(i, j, 4, 0, Math.PI*2); ctx.fill(); } }
+                const distTex = new THREE.CanvasTexture(canvas); distTex.wrapS = THREE.RepeatWrapping; distTex.wrapT = THREE.RepeatWrapping; distTex.repeat.set(2, 2);
+                const distMat = new THREE.MeshStandardMaterial({map: distTex, color: 0x888888, roughness: 0.8});
+                const distMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.32, 0.05, 32), distMat);
+                distMesh.position.set(0, -0.025, 0); this.scene.add(distMesh);
+
+                const inlet = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.3, 16), new THREE.MeshStandardMaterial({color: 0x64748b}));
+                inlet.position.set(0, -0.15, 0); this.scene.add(inlet);
+
+                this.flowPos = new Float32Array(this.flowCount * 3);
+                for(let i=0; i<this.flowCount; i++) { this.flowPos[i*3] = (Math.random() - 0.5) * 0.5; this.flowPos[i*3+1] = Math.random() * this.H; this.flowPos[i*3+2] = (Math.random() - 0.5) * 0.5; }
+                const arrowGeo = new THREE.ConeGeometry(0.012, 0.06, 4); arrowGeo.translate(0, 0.03, 0); 
+                const arrowMat = new THREE.MeshBasicMaterial({color: 0x0ea5e9, transparent: true, opacity: 0.0});
+                this.flowMesh = new THREE.InstancedMesh(arrowGeo, arrowMat, this.flowCount); this.scene.add(this.flowMesh);
+
+                const pGeo = new THREE.SphereGeometry(1, 10, 10); const pMat = new THREE.MeshStandardMaterial({ color: 0xf59e0b, roughness: 0.3 });
+                this.instancedMesh = new THREE.InstancedMesh(pGeo, pMat, this.maxParticles);
+                this.instancedMesh.count = this.particleEngine.count; this.scene.add(this.instancedMesh);
+
+                window.addEventListener('resize', () => this.onWindowResize(), false);
+                this.lastRenderTime = performance.now();
+                this.animate();
+            },
+            
+            onWindowResize() {
+                this.camera.aspect = window.innerWidth / window.innerHeight;
+                this.camera.updateProjectionMatrix();
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+            },
+            
+            animate() {
+                requestAnimationFrame(() => this.animate());
+                const now = performance.now();
+                const deltaT = (now - this.lastRenderTime) / 1000; 
+                this.lastRenderTime = now;
+                
+                if (!App.State.isFrozen) {
+                    
+                    // --- CAJA DE CAMBIOS LÓGICA: SIMULACIÓN REAL ---
+                    if (App.State.isRunning && App.State.mode === 'real') {
+                        const umf_global = App.State.out.umf_global;
+                        let targetU = umf_global * 1.15; 
+                        if(targetU > 0.8) targetU = 0.8;
+                        
+                        if (App.State.in.u < targetU) {
+                            let currentU = App.State.in.u;
+                            let ratio = currentU / umf_global;
+                            
+                            // Algoritmo de velocidad de transición inteligente
+                            let speedMult;
+                            if (ratio < 0.85) {
+                                speedMult = 0.04; // Marcha 1: Acercamiento rápido por zona estática irrelevante
+                            } else if (ratio >= 0.85 && ratio <= 1.05) {
+                                speedMult = 0.003; // Marcha 2: Desaceleración severa en Umf para apreciar desbloqueo
+                            } else {
+                                speedMult = 0.015; // Marcha 3: Retoma velocidad natural tras fluidizar
+                            }
+
+                            let newU = currentU + (targetU * speedMult * deltaT);
+                            if (newU > targetU) newU = targetU; // Freno inteligente exacto en 1.15x
+                            App.State.in.u = newU;
+                            document.getElementById('inp-u').value = newU; 
+                            document.getElementById('lbl-u').innerText = newU.toFixed(3) + ' m/s';
+                        }
+                    }
+
+                    if (App.State.autoAdd && now - App.State.lastAddTimer > 3000) { App.System.addParticles(10); App.State.lastAddTimer = now; }
+                    if (App.State.isRunning) { App.State.time += deltaT; document.getElementById('time-overlay').innerText = `${App.State.time.toFixed(2)} s`; }
+
+                    const pos = this.particleEngine.step(deltaT, App.State.in, App.State.out);
+                    
+                    // SINCRONIZACIÓN GRÁFICA ESTRICTA: El punto lee la velocidad inercial real
+                    const u_real_physical = this.particleEngine.u_inercial;
+                    App.Physics.updateInstantaneousState(u_real_physical);
+
+                    this.frameCount++;
+                    if(this.frameCount % 3 === 0){
+                        App.UI.render(App.State.in, App.State.out);
+                    }
+
+                    const radioVisual = App.State.in.dp * 12.0; 
+                    this.instancedMesh.count = this.particleEngine.count;
+                    for(let i=0; i < this.particleEngine.count; i++) {
+                        this.dummy.position.set(pos[i*3], pos[i*3+1], pos[i*3+2]);
+                        this.dummy.scale.set(radioVisual, radioVisual, radioVisual);
+                        this.dummy.updateMatrix();
+                        this.instancedMesh.setMatrixAt(i, this.dummy.matrix);
+                    }
+                    this.instancedMesh.instanceMatrix.needsUpdate = true;
+
+                    const r_activo = App.State.in.rflujo * 0.28; 
+                    this.flowMesh.material.opacity = Math.min(u_real_physical * 2.0, 0.6);
+                    if (u_real_physical > 0.001) {
+                        for(let i=0; i<this.flowCount; i++) {
+                            let r_ang = Math.random() * Math.PI * 2; let r_rad = Math.random() * r_activo;
+                            this.flowPos[i*3+1] += u_real_physical * deltaT * 4.0; 
+                            if (this.flowPos[i*3+1] > this.H) { 
+                                this.flowPos[i*3+1] = 0; this.flowPos[i*3] = Math.cos(r_ang) * r_rad; this.flowPos[i*3+2] = Math.sin(r_ang) * r_rad;
+                            }
+                            this.dummy.position.set(this.flowPos[i*3], this.flowPos[i*3+1], this.flowPos[i*3+2]);
+                            this.dummy.updateMatrix(); this.flowMesh.setMatrixAt(i, this.dummy.matrix);
+                        }
+                        this.flowMesh.instanceMatrix.needsUpdate = true;
+                    } else { this.flowMesh.material.opacity = 0; }
+                }
+
+                if (App.System.arActive) {
+                    const iframe = document.getElementById('ar-iframe');
+                    if(iframe.contentWindow) {
+                        iframe.contentWindow.postMessage({
+                            type: 'SYNC', positions: this.particleEngine.pos, count: this.particleEngine.count, 
+                            scale: App.State.in.dp * 12.0, u: App.State.out.u_real, rflujo: App.State.in.rflujo, isFrozen: App.State.isFrozen
+                        }, '*');
+                    }
+                }
+
+                this.controls.update(); 
+                this.renderer.render(this.scene, this.camera);
+            }
+        };
+
+        // ==========================================
+        // 5. CONTROLADOR DE INTERFAZ Y CHART DINÁMICO
+        // ==========================================
+        App.UI = {
+            chart: null,
+            init() {
+                ['u', 'rflujo', 'dp', 'rhos', 'rhof', 'mu', 'l0'].forEach(k => {
+                    document.getElementById(`inp-${k}`).addEventListener('input', (e) => {
+                        if(App.State.mode === 'real' && k === 'u') return;
+                        let v = parseFloat(e.target.value);
+                        let textVal = v.toFixed(k==='u'?3:(k==='dp'?4:2));
+                        if(k==='mu') textVal = v.toExponential(2);
+                        if(k==='rflujo') textVal = (v*100).toFixed(0) + '%';
+                        document.getElementById(`lbl-${k}`).innerText = textVal + (k==='rhos'||k==='rhof'?' kg/m³':(k==='u'?' m/s':(k==='dp'||k==='l0'?' m':'')));
+                        if(k==='l0') App.State.update('l0_base', v); else App.State.update(k, v);
+                    });
+                });
+
+                const ctx = document.getElementById('chartCanvas').getContext('2d');
+                this.chart = new Chart(ctx, {
+                    type: 'line',
+                    data: { datasets: [
+                        { label: 'Fijo', data: [], borderColor: '#0ea5e9', borderWidth: 2, pointRadius: 0, fill: false, tension: 0.1 },
+                        { label: 'Fluido', data: [], borderColor: '#10b981', borderWidth: 2, borderDash: [5,5], pointRadius: 0, fill: false },
+                        { label: 'Actual', data: [], backgroundColor: '#ef4444', borderColor: '#ffffff', borderWidth: 2, pointRadius: 5, type: 'scatter', z: 10 }
+                    ]},
+                    options: { 
+                        responsive: true, maintainAspectRatio: false, animation: false, 
+                        scales: { 
+                            x: { type: 'linear', title: {display: true, text: 'Vel u', color: '#94a3b8'}, grid: {color: '#2d3342'}, ticks:{font:{size:9}} }, 
+                            y: { title: {display: true, text: 'ΔP [Pa]', color: '#94a3b8'}, grid: {color: '#2d3342'}, ticks:{font:{size:9}} } 
+                        },
+                        plugins: { legend: { labels: { color: '#e2e8f0', font: {size: 9}, boxWidth: 10 } } }
+                    }
+                });
+
+                App.State.listeners.push((inp, out) => this.render(inp, out));
+            },
+            
+            render(inp, out) {
+                document.getElementById('out-umf').innerText = out.umf_global.toFixed(4);
+                document.getElementById('out-deltap').innerText = out.deltap.toFixed(0);
+                document.getElementById('out-l').innerText = out.l_exp.toFixed(3);
+                document.getElementById('out-re').innerText = out.re.toFixed(2);
+                document.getElementById('out-ar').innerText = out.ar.toExponential(2);
+                
+                const ind = document.getElementById('regime-indicator');
+                ind.innerText = out.regimen;
+                ind.style.backgroundColor = out.regimen.includes('REPOSO') ? 'transparent' : (out.regimen.includes('FIJO') ? 'rgba(245, 158, 11, 0.2)' : (out.regimen.includes('TRANSICIÓN') ? 'rgba(239, 68, 68, 0.2)' : 'rgba(16, 185, 129, 0.2)'));
+                ind.style.color = out.regimen.includes('REPOSO') ? 'var(--text-muted)' : (out.regimen.includes('FIJO') ? 'var(--c-orange)' : (out.regimen.includes('TRANSICIÓN') ? 'var(--c-red)' : 'var(--c-green)'));
+
+                let dErgun = [], dMeseta = [];
+                const l0_eff = inp.l0_base * out.n_ratio;
+                const P_max = l0_eff * (1 - inp.e0) * (inp.rhos - inp.rhof) * 9.81;
+                const Umf_global = out.umf_global;
+                const max_u_chart = Math.max(0.8, Umf_global * 1.5); 
+
+                // Trazado exacto de Ergun hasta intersectar la Meseta
+                for(let x = 0; x <= max_u_chart; x += 0.01) {
+                    let x_local = x / Math.pow(inp.rflujo, 2);
+                    let viscoso = 150 * ((inp.mu * x_local * Math.pow(1 - inp.e0, 2)) / (Math.pow(inp.dp, 2) * Math.pow(inp.e0, 3)));
+                    let inercial = 1.75 * ((inp.rhof * Math.pow(x_local, 2) * (1 - inp.e0)) / (inp.dp * Math.pow(inp.e0, 3)));
+                    let p_erg = l0_eff * (viscoso + inercial);
+                    
+                    if(p_erg <= P_max) {
+                        dErgun.push({x: x, y: p_erg});
+                    } else {
+                        dErgun.push({x: x, y: P_max});
+                        break; 
+                    }
+                }
+                
+                let interceptX = dErgun.length > 0 ? dErgun[dErgun.length-1].x : Umf_global;
+                dMeseta.push({x: interceptX, y: P_max}); 
+                dMeseta.push({x: max_u_chart, y: P_max});
+                
+                this.chart.data.datasets[0].data = dErgun; this.chart.data.datasets[1].data = dMeseta;
+                this.chart.data.datasets[2].data = [{x: out.u_real, y: out.deltap}];
+                this.chart.options.scales.x.max = max_u_chart; this.chart.options.scales.y.max = P_max * 1.35; 
+                this.chart.update('none'); 
+            }
+        };
+
+        // ==========================================
+        // 6. CONTROLADOR MAESTRO
+        // ==========================================
+        App.System = {
+            arActive: false,
+            init() { App.UI.init(); App.Web3D.init(); App.Physics.recalculate(); },
+            addParticles(num) { App.Web3D.particleEngine.addParticles(num); },
+            changeMode(mode) {
+                App.State.mode = mode; App.State.isFrozen = false; 
+                const inputU = document.getElementById('inp-u');
+                if (mode === 'real') {
+                    inputU.disabled = true; App.State.time = 0;
+                    App.Physics.recalculateStatic();
+                    let startU = App.State.out.umf_global * 0.10; 
+                    App.State.in.u = startU; inputU.value = startU;
+                    document.getElementById('lbl-u').innerText = startU.toFixed(3) + ' m/s';
+                    App.Web3D.particleEngine.u_inercial = startU;
+                    if(!App.State.isRunning) this.play();
+                } else { inputU.disabled = false; }
+            },
+            play() {
+                App.State.isFrozen = false; App.State.isRunning = true;
+                if (App.State.in.u === 0 && App.State.mode === 'sandbox') {
+                    App.State.in.u = 0.05; document.getElementById('inp-u').value = 0.05; 
+                    document.getElementById('lbl-u').innerText = '0.050 m/s'; App.Physics.recalculate();
+                }
+            },
+            freeze() { App.State.isFrozen = true; },
+            stopFlow() {
+                App.State.isFrozen = false; App.State.isRunning = false;
+                App.State.update('u', 0); document.getElementById('inp-u').value = 0; document.getElementById('lbl-u').innerText = '0.000 m/s';
+            },
+            openAR() {
+                this.arActive = true; document.getElementById('ar-modal').style.display = 'block';
+                const iframe = document.getElementById('ar-iframe');
+                iframe.srcdoc = `
+                    <html>
+                    <head>
+                        <script src="https://aframe.io/releases/1.3.0/aframe.min.js"><\/script>
+                        <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"><\/script>
+                    </head>
+                    <body style="margin: 0; overflow: hidden;">
+                        <a-scene embedded arjs="sourceType: webcam; debugUIEnabled: false;" vr-mode-ui="enabled: false">
+                            <a-marker preset="hiro">
+                                <a-cylinder radius="0.1" height="0.3" color="#64748b" position="0 -0.15 0"></a-cylinder>
+                                <a-cylinder radius="0.32" height="0.05" color="#2d3342" position="0 -0.025 0"></a-cylinder>
+                                <a-cylinder id="ar-wall" radius="0.3" height="3.0" color="#0ea5e9" opacity="0.2" position="0 1.5 0" material="side: double"></a-cylinder>
+                                <a-cylinder radius="0.32" height="0.05" color="#475569" position="0 3.0 0"></a-cylinder>
+                                <a-entity id="flow-container"></a-entity>
+                                <a-entity id="particles-container"></a-entity>
+                            </a-marker>
+                            <a-entity camera></a-entity>
+                        </a-scene>
+                        <script>
+                            const container = document.getElementById('particles-container'); const flowContainer = document.getElementById('flow-container');
+                            const spheres = []; const flowCones = []; let currentCount = 0; const H = 3.0;
+                            for(let i=0; i<60; i++){
+
+    let el = document.createElement('a-cone');
+
+    el.setAttribute('radius-bottom', '0.025');
+    el.setAttribute('radius-top', '0');
+    el.setAttribute('height', '0.12');
+    el.setAttribute('color', '#00BFFF');
+    el.setAttribute('opacity', '0');
+
+    flowContainer.appendChild(el);
+
+    flowCones.push({
+        el: el,
+        y: Math.random() * H,
+        r: Math.random() * 0.25,
+        ang: Math.random() * Math.PI * 2
+    });
+
+}
+                            function updateSpheres(targetCount) {
+                                while(spheres.length < targetCount) {
+                                    let el = document.createElement('a-sphere'); el.setAttribute('color', '#f59e0b'); el.setAttribute('segments-height', '8'); el.setAttribute('segments-width', '8');
+                                    container.appendChild(el); spheres.push(el);
+                                }
+                                for(let i=0; i<spheres.length; i++){ spheres[i].setAttribute('visible', i < targetCount); }
+                            }
+                            window.addEventListener('message', (e) => {
+                                if(e.data.type === 'SYNC') {
+                                    const pos = e.data.positions; const count = e.data.count; const scale = e.data.scale;
+                                    const u = e.data.u; const r_activo = e.data.rflujo * 0.28; const isFrozen = e.data.isFrozen;
+                                    
+                                    if(currentCount !== count) { currentCount = count; updateSpheres(count); }
+                                    for(let i=0; i<count; i++){ spheres[i].object3D.position.set(pos[i*3], pos[i*3+1], pos[i*3+2]); spheres[i].object3D.scale.set(scale, scale, scale); }
+                                    
+                                    const dt = 1/60; const opacity = Math.min(u * 2.0, 0.6).toString();
+                                    flowCones.forEach(cone => {
+                                        if(u > 0.001) {
+                                            if (!isFrozen) {
+                                                cone.y += u * dt * 4.0; if(cone.y > H) { cone.y = 0; cone.r = Math.random() * r_activo; cone.ang = Math.random() * Math.PI * 2; }
+                                            }
+                                            let x = Math.cos(cone.ang) * cone.r; let z = Math.sin(cone.ang) * cone.r;
+                                            cone.el.setAttribute('position', \`\${x} \${cone.y} \${z}\`); cone.el.setAttribute('opacity', opacity);
+                                        } else { cone.el.setAttribute('opacity', '0'); }
+                                    });
+                                }
+                            });
+                        <\/script>
+                    </body>
+                    </html>
+                `;
+            },
+            closeAR() {
+                this.arActive = false; document.getElementById('ar-modal').style.display = 'none'; document.getElementById('ar-iframe').srcdoc = ""; 
+            }
+        };
+// ==========================================
+// COMANDOS RECIBIDOS DESDE AR.HTML
+// ==========================================
+
+window.addEventListener("message", (event) => {
+
+    const data = event.data;
+
+    if(data.type !== "AR_CONTROL") return;
+
+    switch(data.variable){
+
+        case "u":
+
+            App.State.update("u", data.value);
+
+            document.getElementById("inp-u").value = data.value;
+
+            document.getElementById("lbl-u").innerText =
+                Number(data.value).toFixed(3) + " m/s";
+
+        break;
+
+    }
+
+});
+        window.onload = () => App.System.init();
+    </script>
+</body>
+</html>
